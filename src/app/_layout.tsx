@@ -61,6 +61,7 @@ export default function RootLayout() {
           <Stack.Screen name="compare" options={{ headerShown: false, gestureEnabled: false }} />
           <Stack.Screen name="gopro" options={{ headerShown: false }} />
           <Stack.Screen name="gopro-media" options={{ title: 'Videos auf der Kamera', headerBackTitle: 'Live' }} />
+          <Stack.Screen name="about" options={{ title: 'Impressum und Feedback', headerBackTitle: 'Videos' }} />
         </Stack>
       </ThemeProvider>
     </SQLiteProvider>

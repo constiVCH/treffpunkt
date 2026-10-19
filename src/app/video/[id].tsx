@@ -54,7 +54,7 @@ import {
 import { describeError, saveToGallery, shareFile } from '@/lib/export';
 import { formatFps, formatTime } from '@/lib/format';
 import { setPlayerRate } from '@/lib/player-control';
-import { removeVideoFile } from '@/lib/video-files';
+import { removeVideoFiles } from '@/lib/video-files';
 
 const Speeds = [0.1, 0.25, 0.5, 1];
 
@@ -333,7 +333,7 @@ function Analyzer({ video }: { video: Video }) {
         onPress: async () => {
           player.pause();
           await deleteVideo(db, video.id);
-          removeVideoFile(video.uri);
+          removeVideoFiles(video);
           router.back();
         },
       },

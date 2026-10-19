@@ -8,6 +8,7 @@
     "scheme": "treffpunkt",
     "userInterfaceStyle": "dark",
     "ios": {
+      "supportsTablet": true,
       "icon": "./assets/images/icon.png",
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "$(PRODUCT_NAME) verbindet sich mit deiner GoPro im WLAN, um Aufnahmen zu steuern und Videos zu übertragen.",

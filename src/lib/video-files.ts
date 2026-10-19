@@ -20,9 +20,13 @@ export function newVideoFile(extension: string): File {
   return new File(folder, `video-${Date.now()}${extension}`);
 }
 
-export function removeVideoFile(uri: string) {
-  const file = new File(uri);
-  if (file.exists) {
-    file.delete();
+/** Deletes a library video's file and its thumbnail. */
+export function removeVideoFiles(video: { uri: string; thumbnailUri: string | null }) {
+  for (const uri of [video.uri, video.thumbnailUri]) {
+    if (!uri) continue;
+    const file = new File(uri);
+    if (file.exists) {
+      file.delete();
+    }
   }
 }

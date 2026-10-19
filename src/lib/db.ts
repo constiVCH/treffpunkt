@@ -11,6 +11,15 @@ export type Video = {
   duration: number;
   /** Detected on first playback (or reported by the GoPro); null until known. */
   frameRate: number | null;
+  /** Still frame for the library list; null until generated. */
+  thumbnailUri: string | null;
+  folderId: number | null;
+  createdAt: number;
+};
+
+export type Folder = {
+  id: number;
+  name: string;
   createdAt: number;
 };
 
@@ -28,7 +37,7 @@ export type Annotation = {
   shape: Shape;
 };
 
-const LatestVersion = 3;
+const LatestVersion = 4;
 
 export async function migrateDb(db: SQLiteDatabase) {
   const row = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
@@ -75,6 +84,19 @@ export async function migrateDb(db: SQLiteDatabase) {
     version = 3;
   }
 
+  if (version === 3) {
+    await db.execAsync(`
+      CREATE TABLE folders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        createdAt INTEGER NOT NULL
+      );
+      ALTER TABLE videos ADD COLUMN folderId INTEGER;
+      ALTER TABLE videos ADD COLUMN thumbnailUri TEXT;
+    `);
+    version = 4;
+  }
+
   await db.execAsync(`PRAGMA user_version = ${version}`);
 }
 
@@ -88,14 +110,18 @@ export function getVideo(db: SQLiteDatabase, id: number) {
 
 export async function addVideo(
   db: SQLiteDatabase,
-  video: Omit<Video, 'id' | 'createdAt' | 'frameRate'> & { frameRate?: number | null }
+  video: Pick<Video, 'title' | 'uri' | 'duration'> & {
+    frameRate?: number | null;
+    folderId?: number | null;
+  }
 ) {
   const result = await db.runAsync(
-    'INSERT INTO videos (title, uri, duration, frameRate, createdAt) VALUES (?, ?, ?, ?, ?)',
+    'INSERT INTO videos (title, uri, duration, frameRate, folderId, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
     video.title,
     video.uri,
     video.duration,
     video.frameRate ?? null,
+    video.folderId ?? null,
     Date.now()
   );
   return result.lastInsertRowId;
@@ -116,11 +142,44 @@ export async function renameVideo(db: SQLiteDatabase, id: number, title: string)
   await db.runAsync('UPDATE videos SET title = ? WHERE id = ?', title, id);
 }
 
+export async function setVideoThumbnail(db: SQLiteDatabase, id: number, thumbnailUri: string) {
+  await db.runAsync('UPDATE videos SET thumbnailUri = ? WHERE id = ?', thumbnailUri, id);
+}
+
+export async function moveVideo(db: SQLiteDatabase, id: number, folderId: number | null) {
+  await db.runAsync('UPDATE videos SET folderId = ? WHERE id = ?', folderId, id);
+}
+
 export async function deleteVideo(db: SQLiteDatabase, id: number) {
   await db.withTransactionAsync(async () => {
     await db.runAsync('DELETE FROM notes WHERE videoId = ?', id);
     await db.runAsync('DELETE FROM annotations WHERE videoId = ?', id);
     await db.runAsync('DELETE FROM videos WHERE id = ?', id);
+  });
+}
+
+export function getFolders(db: SQLiteDatabase) {
+  return db.getAllAsync<Folder>('SELECT * FROM folders ORDER BY name COLLATE NOCASE');
+}
+
+export async function addFolder(db: SQLiteDatabase, name: string) {
+  const result = await db.runAsync(
+    'INSERT INTO folders (name, createdAt) VALUES (?, ?)',
+    name,
+    Date.now()
+  );
+  return result.lastInsertRowId;
+}
+
+export async function renameFolder(db: SQLiteDatabase, id: number, name: string) {
+  await db.runAsync('UPDATE folders SET name = ? WHERE id = ?', name, id);
+}
+
+/** Removes the folder only; its videos stay in the library without a folder. */
+export async function deleteFolder(db: SQLiteDatabase, id: number) {
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('UPDATE videos SET folderId = NULL WHERE folderId = ?', id);
+    await db.runAsync('DELETE FROM folders WHERE id = ?', id);
   });
 }
 
