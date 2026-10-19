@@ -44,3 +44,6 @@ example
 
 # Anthropic skills checkout (installed to ~/.claude/skills, not part of the app)
 skills/
+
+# Persönliche Claude-Code-Einstellungen
+.claude/
