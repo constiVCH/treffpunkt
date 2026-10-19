@@ -1,55 +1,46 @@
 /**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://unistyl.es/), etc.
+ * Treffpunkt's palette comes from an indoor volleyball hall: the blue free zone around the
+ * court, the orange playing area, the yellow of the match ball and the white of net tape
+ * and court lines. The app always uses this one scheme, light or dark system setting alike,
+ * because analysis happens on top of video.
  */
 
-import '@/global.css';
-
-import { Platform } from 'react-native';
-
-export const Colors = {
-  light: {
-    text: '#000000',
-    background: '#ffffff',
-    backgroundElement: '#F0F0F3',
-    backgroundSelected: '#E0E1E6',
-    textSecondary: '#60646C',
-  },
-  dark: {
-    text: '#ffffff',
-    background: '#000000',
-    backgroundElement: '#212225',
-    backgroundSelected: '#2E3135',
-    textSecondary: '#B0B4BA',
-  },
+const Hall = {
+  /** Free-zone blue: the base of every screen. */
+  text: '#F3F5FA',
+  background: '#0F2350',
+  /** Raised controls and inputs. */
+  backgroundElement: '#1B3368',
+  backgroundSelected: '#2A4785',
+  textSecondary: '#A7B6D6',
+  /** Court orange: the main action on a screen. */
+  primary: '#FF6B1A',
+  onPrimary: '#0F2350',
+  /** Ball yellow: measured values such as frame rate and angles. */
+  highlight: '#FFD23F',
+  onHighlight: '#0F2350',
+  /** Court lines, used as dividers. */
+  line: 'rgba(243, 245, 250, 0.22)',
+  danger: '#FF5A5F',
+  /** Translucent blue for controls on top of video. */
+  overlay: 'rgba(15, 35, 80, 0.86)',
 } as const;
 
-export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
+export const Colors = {
+  light: Hall,
+  dark: Hall,
+} as const;
 
-export const Fonts = Platform.select({
-  ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
-    rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
-  },
-  default: {
-    sans: 'normal',
-    serif: 'serif',
-    rounded: 'normal',
-    mono: 'monospace',
-  },
-  web: {
-    sans: 'var(--font-display)',
-    serif: 'var(--font-serif)',
-    rounded: 'var(--font-rounded)',
-    mono: 'var(--font-mono)',
-  },
-});
+export type ThemeColor = keyof typeof Hall;
+
+export const Fonts = {
+  body: 'Saira_400Regular',
+  bodyMedium: 'Saira_500Medium',
+  bodyBold: 'Saira_600SemiBold',
+  /** Scoreboard face for the wordmark, headings and all numbers. */
+  display: 'SairaExtraCondensed_700Bold',
+  displayMedium: 'SairaExtraCondensed_600SemiBold',
+} as const;
 
 export const Spacing = {
   half: 2,
@@ -61,5 +52,11 @@ export const Spacing = {
   six: 64,
 } as const;
 
-export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
+/** Corner radii by role, so controls, sheets and tags read as different things. */
+export const Radius = {
+  control: 6,
+  tag: 3,
+  sheet: 18,
+} as const;
+
 export const MaxContentWidth = 800;

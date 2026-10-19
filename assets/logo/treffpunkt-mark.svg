@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  
+  <g transform="translate(0 0) scale(1)">
+  <path d="M196 312 V196 H312 M712 196 H828 V312 M828 712 V828 H712 M312 828 H196 V712" fill="none" stroke="#F3F5FA" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="456.8" cy="520.4" r="64" fill="none" stroke="#FF6B1A" stroke-width="14"/>
+  <circle cx="353.2" cy="614.2" r="50" fill="none" stroke="#FF6B1A" stroke-width="10"/>
+  <circle cx="279.3" cy="698.2" r="36" fill="none" stroke="#FF6B1A" stroke-width="7"/>
+  <clipPath id="ball"><circle cx="628" cy="392" r="124"/></clipPath>
+  <circle cx="628" cy="392" r="124" fill="#FFD23F"/>
+  <path d="M628 392 Q529.6 352.3 604.4 258.1 M628 392 Q711.6 326.7 755.8 438.5 M628 392 Q642.8 497.0 523.8 479.4" clip-path="url(#ball)" fill="none" stroke="#0F2350" stroke-width="16" stroke-linecap="round"/>
+  </g>
+</svg>

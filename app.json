@@ -1,18 +1,24 @@
 {
   "expo": {
-    "name": "volleyball-app",
+    "name": "Treffpunkt",
     "slug": "volleyball-app",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/images/icon.png",
-    "scheme": "volleyballapp",
-    "userInterfaceStyle": "automatic",
+    "scheme": "treffpunkt",
+    "userInterfaceStyle": "dark",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/images/icon.png",
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "$(PRODUCT_NAME) verbindet sich mit deiner GoPro im WLAN, um Aufnahmen zu steuern und Videos zu übertragen.",
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        }
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#0F2350",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -25,12 +31,42 @@
     },
     "plugins": [
       "expo-router",
+      "expo-sqlite",
+      "expo-video",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "$(PRODUCT_NAME) braucht Zugriff auf deine Videos, damit du Trainingsaufnahmen analysieren kannst.",
+          "cameraPermission": "$(PRODUCT_NAME) braucht die Kamera, um dein Training aufzunehmen.",
+          "microphonePermission": "$(PRODUCT_NAME) nimmt bei Videos auch den Ton auf."
+        }
+      ],
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#0F2350",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 160
+        }
+      ],
+      "expo-sharing",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "$(PRODUCT_NAME) speichert exportierte Videos und Standbilder in deiner Galerie.",
+          "savePhotosPermission": "$(PRODUCT_NAME) speichert exportierte Videos und Standbilder in deiner Galerie.",
+          "granularPermissions": [
+            "photo",
+            "video"
+          ]
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
         }
       ]
     ],

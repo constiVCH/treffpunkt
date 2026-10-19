@@ -1,56 +1,48 @@
-# Welcome to your Expo app 👋
+# Treffpunkt
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Videoanalyse für Volleyball: Aktion aufnehmen oder importieren, Bild für Bild durchgehen, einzeichnen, vergleichen.
 
-## Get started
+## Funktionen
 
-1. Install dependencies
+- **Aufnehmen oder importieren:** Die Analyse öffnet sich direkt danach. Beim Import bleibt die Originaldatei mit ihrer vollen Bildrate erhalten, z. B. Slo-Mo mit 240 fps.
+- **Analyse im Vollbild**
+  - Jog-Wheel für Einzelbilder, Zeitlupe von 0,1× bis 1×, A–B-Schleife, Spiegeln
+  - Bildrate des Videos immer im Blick
+- **Zeichnen:** Freihand, Linie, Pfeil, Kreis und Winkel mit Gradanzeige. Die Zeichnungen werden pro Bild gespeichert.
+- **Notizen** mit Zeitstempel
+- **Vergleich:** zwei Videos nebeneinander oder untereinander. Erst einzeln ausrichten, dann gemeinsam abspielen.
+- **GoPro (HERO9 und neuer):** Aufnahme fernsteuern und Videos mit hoher Bildrate über das Kamera-WLAN übertragen (Open GoPro HTTP API)
+- **Export:** Standbild mit Zeichnungen und Originalvideo teilen oder in der Galerie speichern
 
-   ```bash
-   npm install
-   ```
+## Entwicklung
 
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **src/app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+Expo SDK 58, Expo Router, expo-video, expo-sqlite.
 
 ```bash
-npm run reset-project
+npm install
+npx expo start          # mit Expo Go scannen; --tunnel, wenn das WLAN blockiert
+npx expo lint
+npx tsc --noEmit
 ```
 
-This command will move the starter code to the **example** directory and create a blank **src/app** directory where you can start developing.
+Neue Pakete immer mit `npx expo install <paket>` hinzufügen.
 
-### Other setup steps
+## Aufbau
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+| Pfad | Inhalt |
+| --- | --- |
+| `src/app/` | Screens: Videos, Analyse, Vergleich, GoPro |
+| `src/components/` | Jog-Wheel, Zeichenebene, Standbild-Export, Logo, Buttons |
+| `src/hooks/use-frame-player.ts` | Videoplayer mit bildgenauem Springen |
+| `src/lib/` | Datenbank, GoPro-Schnittstelle, Export, Formatierung |
+| `src/constants/theme.ts` | Hallen-Palette, Schriften, Abstände |
+| `assets/logo/` | Logo als SVG |
 
-## Learn more
+## Design
 
-To learn more about developing your project with Expo, look at the following resources:
+Die Farben kommen aus der Volleyballhalle: Freizone-Blau `#0F2350`, Spielfeld-Orange `#FF6B1A`, Ball-Gelb `#FFD23F` und Netzband-Weiß `#F3F5FA`. Die Schriften sind Saira für Text und Saira ExtraCondensed für Zahlen und Überschriften. Das Logo zeigt den Ball, wie er Bild für Bild zum Treffpunkt steigt, im Sucherrahmen einer Kamera.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Grenzen in Expo Go
 
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+- Die eigene Kamera der App filmt nicht mit wählbarer Bildrate. Für hohe fps nimmst du in der System-Kamera im Slo-Mo-Modus auf und importierst das Video, oder du nutzt eine GoPro.
+- Videos mit eingebrannten Zeichnungen und das GoPro-Livebild brauchen einen eigenen Build (`eas build --profile development`).
