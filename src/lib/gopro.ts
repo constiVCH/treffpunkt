@@ -57,6 +57,20 @@ export async function setShutter(recording: boolean) {
   await request(`/gopro/camera/shutter/${recording ? 'start' : 'stop'}`, 8000);
 }
 
+/** UDP port the camera sends its live preview (MPEG-TS) to, on the phone's address. */
+export const PreviewPort = 8554;
+export const PreviewUrl = `udp://@:${PreviewPort}`;
+
+export async function startPreview() {
+  // A stream left running from an earlier session makes "start" fail, so stop it first.
+  await stopPreview().catch(() => {});
+  await request(`/gopro/camera/stream/start?port=${PreviewPort}`);
+}
+
+export async function stopPreview() {
+  await request('/gopro/camera/stream/stop');
+}
+
 export async function listVideos(): Promise<GoProVideo[]> {
   const response = await request('/gopro/media/list', 10000);
   const list = (await response.json()) as {

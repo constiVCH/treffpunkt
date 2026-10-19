@@ -1,84 +1,195 @@
-import { Image } from 'expo-image';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { router } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
-import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/button';
+import { DownloadOverlay } from '@/components/download-overlay';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Fonts, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { useGoProImport } from '@/hooks/use-gopro-import';
 import { useTheme } from '@/hooks/use-theme';
-import { addVideo } from '@/lib/db';
 import { describeError } from '@/lib/export';
-import { formatDateTime, formatFps, formatTime } from '@/lib/format';
+import { formatTime } from '@/lib/format';
 import {
-  downloadVideo,
   getRecordingState,
-  getVideoInfo,
   keepAlive,
   listVideos,
   setShutter,
-  thumbnailUrl,
+  startPreview,
+  stopPreview,
   type GoProVideo,
-  type GoProVideoInfo,
 } from '@/lib/gopro';
 
+// Expo Go and web have no libVLC, and importing the player there would crash, so it is
+// loaded only in native development and release builds.
+const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+const GoProLiveView: typeof import('@/components/gopro-live-view').GoProLiveView | null =
+  isExpoGo || process.env.EXPO_OS === 'web'
+  ? null
+  : // eslint-disable-next-line @typescript-eslint/no-require-imports -- must not load in Expo Go
+    require('@/components/gopro-live-view').GoProLiveView;
+
 type Connection = 'idle' | 'connecting' | 'connected' | 'failed';
-type Download = { video: GoProVideo; progress: number };
+type Live = 'starting' | 'playing' | 'failed';
+/** What happened to the last recording: waiting for the file, found, or not found. */
+type LastRecording = { state: 'saving' } | { state: 'ready'; video: GoProVideo } | { state: 'missing' };
 
 const KeepAliveInterval = 3000;
 
 export default function GoProScreen() {
-  const db = useSQLiteContext();
   const theme = useTheme();
   const [connection, setConnection] = useState<Connection>('idle');
   const [recording, setRecording] = useState(false);
-  const [shutterBusy, setShutterBusy] = useState(false);
-  const [videos, setVideos] = useState<GoProVideo[]>([]);
-  const [download, setDownload] = useState<Download | null>(null);
-  const abort = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    if (connection !== 'connected') return;
-    const timer = setInterval(() => {
-      keepAlive().catch(() => setConnection('failed'));
-    }, KeepAliveInterval);
-    return () => clearInterval(timer);
-  }, [connection]);
-
-  // Cancel a running download when leaving the screen.
-  useEffect(() => () => abort.current?.abort(), []);
 
   async function connect() {
     setConnection('connecting');
     try {
       const state = await getRecordingState();
       setRecording(state.recording);
-      setVideos(await listVideos());
       setConnection('connected');
     } catch {
       setConnection('failed');
     }
   }
 
-  async function refreshVideos() {
-    try {
-      setVideos(await listVideos());
-    } catch {
-      setConnection('failed');
+  if (connection === 'connected') {
+    return (
+      <LiveCamera
+        initiallyRecording={recording}
+        onConnectionLost={() => setConnection('failed')}
+      />
+    );
+  }
+
+  return (
+    <ThemedView style={styles.container}>
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.setupHeader}>
+          <Button label="‹" compact accessibilityLabel="Zurück" style={styles.icon} onPress={() => router.back()} />
+          <ThemedText type="subtitle">GoPro verbinden</ThemedText>
+        </View>
+        <ScrollView contentContainerStyle={styles.setup}>
+          <Step n={1} text="GoPro einschalten (HERO9 oder neuer) und die Bildrate einstellen, z. B. 120 oder 240 fps." />
+          <Step
+            n={2}
+            text="WLAN der GoPro aktivieren. Dafür muss die Kamera einmal mit der GoPro Quik App gekoppelt sein. Name und Passwort des Kamera-WLANs findest du je nach Modell im Kameramenü unter Verbindungen › Kamerainfo."
+          />
+          <Step
+            n={3}
+            text="Dein Handy in den WLAN-Einstellungen mit dem GoPro-WLAN verbinden. Schalte mobile Daten aus, sonst versucht Android, die Kamera über das Mobilnetz zu erreichen."
+          />
+          <Step n={4} text="Zurück in die App und „Verbinden“ tippen. Das Livebild startet automatisch." />
+          {connection === 'failed' && (
+            <ThemedText style={{ color: theme.danger }}>
+              Keine GoPro erreichbar. Prüfe, ob dein Handy im WLAN der Kamera ist, und tippe erneut auf
+              „Verbinden“.
+            </ThemedText>
+          )}
+          <Button
+            label={connection === 'connecting' ? 'Verbinde …' : 'Verbinden'}
+            variant="primary"
+            disabled={connection === 'connecting'}
+            onPress={connect}
+          />
+        </ScrollView>
+      </SafeAreaView>
+    </ThemedView>
+  );
+}
+
+function LiveCamera({
+  initiallyRecording,
+  onConnectionLost,
+}: {
+  initiallyRecording: boolean;
+  onConnectionLost: () => void;
+}) {
+  const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const [live, setLive] = useState<Live>('starting');
+  const [liveError, setLiveError] = useState<string | null>(null);
+  const [streamKey, setStreamKey] = useState(0);
+  const [recording, setRecording] = useState(initiallyRecording);
+  const [recordingSince, setRecordingSince] = useState<number | null>(null);
+  const [now, setNow] = useState(0);
+  const [shutterBusy, setShutterBusy] = useState(false);
+  const [knownPaths, setKnownPaths] = useState<Set<string>>(new Set());
+  const [lastRecording, setLastRecording] = useState<LastRecording | null>(null);
+  const { download, importVideo, cancel } = useGoProImport();
+
+  // Ask the camera to stream to us while this screen is open.
+  useEffect(() => {
+    let active = true;
+    startPreview().catch((error) => {
+      if (!active) return;
+      setLive('failed');
+      setLiveError(describeError(error));
+    });
+    return () => {
+      active = false;
+      stopPreview().catch(() => {});
+    };
+  }, [streamKey]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      keepAlive().catch(onConnectionLost);
+    }, KeepAliveInterval);
+    return () => clearInterval(timer);
+  }, [onConnectionLost]);
+
+  useEffect(() => {
+    if (recordingSince === null) return;
+    const timer = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(timer);
+  }, [recordingSince]);
+
+  function restartStream() {
+    setLive('starting');
+    setLiveError(null);
+    setStreamKey((key) => key + 1);
+  }
+
+  async function startRecording() {
+    setLastRecording(null);
+    // Remember what is on the card so the new file can be told apart afterwards.
+    const before = await listVideos().catch(() => []);
+    setKnownPaths(new Set(before.map((video) => video.path)));
+    await setShutter(true);
+    setRecording(true);
+    setRecordingSince(Date.now());
+    setNow(Date.now());
+  }
+
+  async function stopRecording() {
+    await setShutter(false);
+    setRecording(false);
+    setRecordingSince(null);
+    setLastRecording({ state: 'saving' });
+    // The camera needs a moment to finish writing the file before it shows up in the list.
+    for (let attempt = 0; attempt < 8; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const videos = await listVideos().catch(() => []);
+      const created = videos.find((video) => !knownPaths.has(video.path));
+      if (created) {
+        setLastRecording({ state: 'ready', video: created });
+        return;
+      }
     }
+    setLastRecording({ state: 'missing' });
   }
 
   async function toggleRecording() {
     setShutterBusy(true);
     try {
-      await setShutter(!recording);
-      setRecording(!recording);
       if (recording) {
-        // The new file shows up in the media list once the camera has finished writing it.
-        setTimeout(refreshVideos, 2000);
+        await stopRecording();
+      } else {
+        await startRecording();
       }
     } catch (error) {
       Alert.alert('GoPro reagiert nicht', describeError(error));
@@ -87,123 +198,126 @@ export default function GoProScreen() {
     }
   }
 
-  async function importVideo(video: GoProVideo, info: GoProVideoInfo | null) {
-    const controller = new AbortController();
-    abort.current = controller;
-    setDownload({ video, progress: 0 });
-    try {
-      const uri = await downloadVideo(
-        video,
-        (progress) => setDownload({ video, progress }),
-        controller.signal
-      );
-      const id = await addVideo(db, {
-        title: `GoPro ${video.file.replace(/\.mp4$/i, '')} vom ${formatDateTime(video.createdAt)}`,
-        uri,
-        duration: info?.duration ?? 0,
-        frameRate: info?.frameRate,
-      });
-      router.replace({ pathname: '/video/[id]', params: { id } });
-    } catch (error) {
-      if (!controller.signal.aborted) {
-        Alert.alert('Video nicht übertragen', describeError(error));
-      }
-    } finally {
-      abort.current = null;
-      setDownload(null);
-    }
+  async function analyze(video: GoProVideo) {
+    // Free the WiFi bandwidth for the transfer.
+    await stopPreview().catch(() => {});
+    await importVideo(video);
   }
 
-  return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
-        <FlatList
-          data={connection === 'connected' ? videos : []}
-          keyExtractor={(video) => video.path}
-          contentContainerStyle={styles.content}
-          ListHeaderComponent={
-            <View style={styles.header}>
-              {connection === 'connected' ? (
-                <>
-                  <ThemedView type="backgroundElement" style={styles.card}>
-                    <ThemedText type="subtitle" style={{ color: theme.highlight }}>
-                      GoPro verbunden
-                    </ThemedText>
-                    <Button
-                      label={recording ? '■ Aufnahme stoppen' : '● Aufnahme starten'}
-                      variant={recording ? 'danger' : 'primary'}
-                      disabled={shutterBusy}
-                      onPress={toggleRecording}
-                    />
-                    <ThemedText type="small" themeColor="textSecondary">
-                      Bildrate und Auflösung stellst du an der GoPro ein. Für Zeitlupe eignen sich
-                      120 oder 240 fps. In 1080p ist ein Video deutlich schneller übertragen als in
-                      4K.
-                    </ThemedText>
-                  </ThemedView>
-                  <View style={styles.listHeader}>
-                    <ThemedText type="subtitle">Videos auf der Kamera</ThemedText>
-                    <Button label="Aktualisieren" compact onPress={refreshVideos} />
-                  </View>
-                  {videos.length === 0 && (
-                    <ThemedText type="small" themeColor="textSecondary">
-                      Keine Videos auf der Speicherkarte.
-                    </ThemedText>
-                  )}
-                </>
-              ) : (
-                <ThemedView type="backgroundElement" style={styles.card}>
-                  <ThemedText type="subtitle">So verbindest du die GoPro</ThemedText>
-                  <Step n={1} text="GoPro einschalten (HERO9 oder neuer) und die gewünschte Bildrate einstellen, z. B. 240 fps." />
-                  <Step
-                    n={2}
-                    text="WLAN der GoPro aktivieren. Dafür muss die Kamera einmal mit der GoPro Quik App gekoppelt sein. Name und Passwort des Kamera-WLANs findest du je nach Modell im Kameramenü unter Verbindungen › Kamerainfo."
-                  />
-                  <Step
-                    n={3}
-                    text="Dein Handy in den WLAN-Einstellungen mit dem GoPro-WLAN verbinden. Android: Falls die Verbindung scheitert, mobile Daten kurz ausschalten."
-                  />
-                  <Step n={4} text="Zurück in die App und „Verbinden“ tippen." />
-                  {connection === 'failed' && (
-                    <ThemedText type="small" style={{ color: theme.danger }}>
-                      Keine GoPro erreichbar. Prüfe, ob dein Handy im WLAN der Kamera ist, und tippe
-                      erneut auf „Verbinden“.
-                    </ThemedText>
-                  )}
-                  <Button
-                    label={connection === 'connecting' ? 'Verbinde …' : 'Verbinden'}
-                    variant="primary"
-                    disabled={connection === 'connecting'}
-                    onPress={connect}
-                  />
-                </ThemedView>
-              )}
-            </View>
-          }
-          renderItem={({ item }) => (
-            <GoProVideoRow video={item} disabled={download !== null} onImport={importVideo} />
-          )}
-        />
+  const elapsed = recordingSince === null ? 0 : (now - recordingSince) / 1000;
+  const sideInsets = { paddingLeft: insets.left + Spacing.three, paddingRight: insets.right + Spacing.three };
 
-        {download && (
-          <View style={[StyleSheet.absoluteFill, styles.overlay]}>
-            <ThemedView type="backgroundElement" style={styles.downloadCard}>
-              <ThemedText type="subtitle">{download.video.file} wird übertragen</ThemedText>
-              <View style={[styles.progressTrack, { backgroundColor: theme.backgroundSelected }]}>
-                <View
-                  style={[
-                    styles.progressFill,
-                    { width: `${Math.round(download.progress * 100)}%`, backgroundColor: theme.primary },
-                  ]}
-                />
-              </View>
-              <ThemedText type="numberLarge">{Math.round(download.progress * 100)} %</ThemedText>
-              <Button label="Abbrechen" compact onPress={() => abort.current?.abort()} />
-            </ThemedView>
+  return (
+    <View style={[styles.screen, { backgroundColor: theme.background }]}>
+      <StatusBar hidden />
+      <View style={styles.stage}>
+        {GoProLiveView ? (
+          <GoProLiveView
+            key={streamKey}
+            style={StyleSheet.absoluteFill}
+            onPlaying={() => setLive('playing')}
+            onError={(message) => {
+              setLive('failed');
+              setLiveError(message);
+            }}
+          />
+        ) : null}
+
+        {!GoProLiveView ? (
+          <View style={styles.stageMessage}>
+            <ThemedText type="subtitle">Livebild nur in der installierten App</ThemedText>
+            <ThemedText themeColor="textSecondary" style={styles.centerText}>
+              Expo Go kann den Stream der GoPro nicht anzeigen. Aufnehmen und Übertragen
+              funktionieren trotzdem.
+            </ThemedText>
           </View>
-        )}
-      </SafeAreaView>
-    </ThemedView>
+        ) : live === 'starting' ? (
+          <View style={styles.stageMessage}>
+            <ActivityIndicator color={theme.primary} size="large" />
+            <ThemedText themeColor="textSecondary">Livebild startet …</ThemedText>
+          </View>
+        ) : live === 'failed' ? (
+          <View style={styles.stageMessage}>
+            <ThemedText type="subtitle">Kein Livebild</ThemedText>
+            <ThemedText themeColor="textSecondary" style={styles.centerText}>
+              {liveError ?? 'Die GoPro sendet kein Bild.'} Manche Bildraten erlauben keine
+              Vorschau. Aufnehmen funktioniert trotzdem.
+            </ThemedText>
+            <Button label="Erneut versuchen" compact onPress={restartStream} />
+          </View>
+        ) : null}
+
+        <View style={[styles.topBar, sideInsets, { paddingTop: insets.top + Spacing.two }]}>
+          <Button label="‹" compact accessibilityLabel="Zurück" style={styles.icon} onPress={() => router.back()} />
+          <ThemedText type="subtitle" style={styles.flex}>
+            GoPro
+          </ThemedText>
+          {recording && (
+            <View style={[styles.timer, { backgroundColor: theme.danger }]}>
+              <View style={styles.timerDot} />
+              <ThemedText type="number" style={styles.timerText}>
+                {formatTime(elapsed).split('.')[0]}
+              </ThemedText>
+            </View>
+          )}
+          <Button label="Videos auf der Kamera" compact onPress={() => router.push('/gopro-media')} />
+        </View>
+      </View>
+
+      <View style={[styles.controls, sideInsets, { paddingBottom: insets.bottom + Spacing.three }]}>
+        <View style={styles.controlSide}>
+          {lastRecording?.state === 'saving' && (
+            <View style={styles.inline}>
+              <ActivityIndicator color={theme.primary} />
+              <ThemedText type="small" themeColor="textSecondary">
+                GoPro speichert die Aufnahme …
+              </ThemedText>
+            </View>
+          )}
+          {lastRecording?.state === 'ready' && (
+            <Button
+              label="Übertragen und analysieren"
+              variant="primary"
+              compact
+              disabled={download !== null}
+              onPress={() => analyze(lastRecording.video)}
+            />
+          )}
+          {lastRecording?.state === 'missing' && (
+            <ThemedText type="small" themeColor="textSecondary">
+              Aufnahme gespeichert. Du findest sie unter „Videos auf der Kamera“.
+            </ThemedText>
+          )}
+          {lastRecording === null && !recording && (
+            <ThemedText type="small" themeColor="textSecondary">
+              Tippe auf den Auslöser, wenn die Aktion beginnt.
+            </ThemedText>
+          )}
+        </View>
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={recording ? 'Aufnahme stoppen' : 'Aufnahme starten'}
+          disabled={shutterBusy}
+          onPress={toggleRecording}
+          style={({ pressed }) => [
+            styles.shutter,
+            { borderColor: theme.text, opacity: shutterBusy ? 0.5 : pressed ? 0.8 : 1 },
+          ]}>
+          <View
+            style={
+              recording
+                ? [styles.shutterStop, { backgroundColor: theme.danger }]
+                : [styles.shutterRecord, { backgroundColor: theme.primary }]
+            }
+          />
+        </Pressable>
+
+        <View style={styles.controlSide} />
+      </View>
+
+      {download && <DownloadOverlay download={download} onCancel={cancel} />}
+    </View>
   );
 }
 
@@ -216,78 +330,8 @@ function Step({ n, text }: { n: number; text: string }) {
           {n}
         </ThemedText>
       </View>
-      <ThemedText type="small" style={styles.flex}>
-        {text}
-      </ThemedText>
+      <ThemedText style={styles.flex}>{text}</ThemedText>
     </View>
-  );
-}
-
-function GoProVideoRow({
-  video,
-  disabled,
-  onImport,
-}: {
-  video: GoProVideo;
-  disabled: boolean;
-  onImport: (video: GoProVideo, info: GoProVideoInfo | null) => void;
-}) {
-  const theme = useTheme();
-  const [info, setInfo] = useState<GoProVideoInfo | null>(null);
-
-  useEffect(() => {
-    getVideoInfo(video).then(setInfo, () => {});
-  }, [video]);
-
-  const sizeMb = info?.size ? `${Math.round(info.size / 1_000_000)} MB` : '';
-
-  return (
-    <Pressable
-      disabled={disabled}
-      onPress={() => onImport(video, info)}
-      style={({ pressed }) => [
-        styles.row,
-        { backgroundColor: theme.backgroundElement, opacity: pressed ? 0.7 : 1 },
-      ]}>
-      <Image source={thumbnailUrl(video)} style={styles.thumbnail} contentFit="cover" />
-      <View style={styles.flex}>
-        <ThemedText type="default" numberOfLines={1}>
-          {video.file}
-        </ThemedText>
-        <ThemedText type="small" themeColor="textSecondary">
-          {formatDateTime(video.createdAt)}
-        </ThemedText>
-        {info ? (
-          <View style={styles.facts}>
-            {info.frameRate ? (
-              <View style={[styles.fpsTag, { backgroundColor: theme.highlight }]}>
-                <ThemedText style={[styles.fpsText, { color: theme.onHighlight }]}>
-                  {formatFps(info.frameRate)}
-                </ThemedText>
-              </View>
-            ) : null}
-            <ThemedText type="number" themeColor="textSecondary">
-              {formatTime(info.duration).split('.')[0]}
-            </ThemedText>
-            {info.height ? (
-              <ThemedText type="number" themeColor="textSecondary">
-                {info.height}p
-              </ThemedText>
-            ) : null}
-            {sizeMb ? (
-              <ThemedText type="number" themeColor="textSecondary">
-                {sizeMb}
-              </ThemedText>
-            ) : null}
-          </View>
-        ) : (
-          <ActivityIndicator size="small" style={styles.infoSpinner} />
-        )}
-      </View>
-      <ThemedText type="smallBold" style={{ color: theme.primary }}>
-        Übertragen
-      </ThemedText>
-    </Pressable>
   );
 }
 
@@ -304,85 +348,111 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
-  content: {
-    gap: Spacing.two,
-    padding: Spacing.three,
-    paddingBottom: Spacing.six,
+  icon: {
+    minWidth: 44,
+    paddingHorizontal: Spacing.two,
   },
-  header: {
+  setupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: Spacing.three,
-    marginBottom: Spacing.one,
+    paddingHorizontal: Spacing.three,
+    paddingTop: Spacing.two,
   },
-  card: {
-    gap: Spacing.three,
+  setup: {
+    gap: Spacing.four,
     padding: Spacing.three,
-    borderRadius: Radius.control,
+    paddingTop: Spacing.four,
+    maxWidth: 620,
   },
   step: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: Spacing.two,
+    gap: Spacing.three,
   },
   stepNumber: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  listHeader: {
+  screen: {
+    flex: 1,
+  },
+  stage: {
+    flex: 1,
+    backgroundColor: '#000',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stageMessage: {
+    alignItems: 'center',
+    gap: Spacing.two,
+    padding: Spacing.four,
+    maxWidth: 480,
+  },
+  centerText: {
+    textAlign: 'center',
+  },
+  topBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: Spacing.two,
+    paddingBottom: Spacing.two,
+    backgroundColor: 'rgba(15, 35, 80, 0.86)',
   },
-  row: {
+  timer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one + Spacing.half,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.half,
+    borderRadius: Radius.tag,
+  },
+  timerDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#FFFFFF',
+  },
+  timerText: {
+    color: '#FFFFFF',
+  },
+  controls: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.three,
-    padding: Spacing.two,
-    borderRadius: Radius.control,
+    paddingTop: Spacing.three,
   },
-  facts: {
+  controlSide: {
+    flex: 1,
+  },
+  inline: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
   },
-  fpsTag: {
-    paddingHorizontal: Spacing.one + Spacing.half,
-    borderRadius: Radius.tag,
-  },
-  fpsText: {
-    fontFamily: Fonts.displayMedium,
-    fontSize: 14,
-    lineHeight: 18,
-  },
-  thumbnail: {
+  shutter: {
     width: 80,
-    height: 60,
-    borderRadius: Radius.tag,
-    backgroundColor: '#000',
-  },
-  infoSpinner: {
-    alignSelf: 'flex-start',
-  },
-  overlay: {
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 4,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(15, 35, 80, 0.75)',
-    padding: Spacing.four,
   },
-  downloadCard: {
-    alignSelf: 'stretch',
-    gap: Spacing.three,
-    padding: Spacing.four,
-    borderRadius: Radius.sheet,
+  shutterRecord: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
   },
-  progressTrack: {
-    height: 8,
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
+  shutterStop: {
+    width: 30,
+    height: 30,
+    borderRadius: Radius.control,
   },
 });

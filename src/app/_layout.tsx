@@ -59,7 +59,8 @@ export default function RootLayout() {
           {/* Full-screen analysis: own controls, and no edge swipe that could steal drawing or scrubbing. */}
           <Stack.Screen name="video/[id]" options={{ headerShown: false, gestureEnabled: false }} />
           <Stack.Screen name="compare" options={{ headerShown: false, gestureEnabled: false }} />
-          <Stack.Screen name="gopro" options={{ title: 'GoPro verbinden', headerBackTitle: 'Videos' }} />
+          <Stack.Screen name="gopro" options={{ headerShown: false }} />
+          <Stack.Screen name="gopro-media" options={{ title: 'Videos auf der Kamera', headerBackTitle: 'Live' }} />
         </Stack>
       </ThemeProvider>
     </SQLiteProvider>
